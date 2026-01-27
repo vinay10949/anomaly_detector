@@ -2,10 +2,10 @@ import http.server
 import socketserver
 import json
 import urllib.parse
-from anomaly_detector import AnomalyDetector
+import random
 
-# Global detector instance
-detector = None
+# Global detector state
+detector_trained = False
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
     def _set_cors_headers(self):
@@ -19,7 +19,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        global detector
+        global detector_trained
 
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
@@ -37,10 +37,11 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(b"No training data provided")
                     return
 
-                detector = AnomalyDetector()
-                detector.train(training_data)
+                # Stub: Simulate training
+                print(f"Training on {len(training_data)} data points...")
+                detector_trained = True
 
-                response = {'status': 'success', 'message': 'Model trained successfully'}
+                response = {'status': 'success', 'message': 'Model trained successfully (stub)'}
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self._set_cors_headers()
@@ -52,7 +53,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == '/detect':
             try:
-                if not detector:
+                if not detector_trained:
                     self.send_response(400)
                     self.send_header('Content-type', 'text/plain')
                     self._set_cors_headers()
@@ -70,13 +71,17 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(b"No data point provided")
                     return
 
-                result = detector.detect_anomaly(data_point)
+                # Stub: Simulate detection with random results
+                anomaly_flag = random.random() < 0.05  # 5% chance of anomaly
+                score = random.uniform(0, 1)
+                confidence = random.uniform(0.5, 1.0)
+                explanation = "Simulated anomaly detection"
 
                 response = {
-                    'anomaly_flag': result['anomaly_flag'],
-                    'score': result['score'],
-                    'confidence': result['confidence'],
-                    'explanation': result['explanation']
+                    'anomaly_flag': anomaly_flag,
+                    'score': score,
+                    'confidence': confidence,
+                    'explanation': explanation
                 }
 
                 self.send_response(200)
@@ -97,7 +102,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/status':
-            status = 'trained' if detector and detector.trained else 'not_trained'
+            status = 'trained' if detector_trained else 'not_trained'
             response = {'status': status}
             self.send_response(200)
             self.send_header('Content-type', 'application/json')

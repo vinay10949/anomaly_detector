@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anomaly Time Series Viewer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/nouislider/dist/nouislider.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-crosshair"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nouislider"></script>
+    <style>
+<!-- STYLES -->
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="top-row">
+            <div class="sidebar">
+                <h1>Anomaly Time Series Viewer</h1>
+                <div class="upload-section">
+                    <div class="drop-zone" id="datasetDropZone">
+                        <input type="file" id="datasetFile" accept=".jsonl,.csv" style="display: none;">
+                        <div class="drop-zone-content">
+                            <div class="drop-icon">📊</div>
+                            <strong>Drop Dataset (.jsonl or .csv)</strong><br>
+                            or click to select your time series data file
+                        </div>
+                    </div>
+                    <div class="drop-zone" id="metadataDropZone">
+                        <input type="file" id="metadataFile" accept=".json" style="display: none;">
+                        <div class="drop-zone-content">
+                            <div class="drop-icon">🏷️</div>
+                            <strong>Drop Anomaly Labels (.json)</strong><br>
+                            or click to select your ground truth anomaly file
+                        </div>
+                    </div>
+                </div>
+                <div class="controls">
+                    <div class="control-group">
+                        <label><strong>Data Aggregation:</strong></label>
+                        <button id="minuteBtn" class="btn active" title="Show data points per minute">Per Minute</button>
+                        <button id="hourBtn" class="btn" title="Aggregate data to hourly averages">Hourly</button>
+                    </div>
+                    <div class="control-group">
+                        <label><strong>Time Range Filter:</strong></label>
+                        <div id="timeRangeSlider"></div>
+                        <div id="timeRangeValue" style="font-family: 'JetBrains Mono', monospace; margin-top: 5px;">0% - 100%</div>
+                    </div>
+                    <div class="control-group">
+                        <button id="trainBtn" class="btn train-btn" title="Simulate training an anomaly detection model">Train Model</button>
+                        <button id="detectBtn" class="btn detect-btn" title="Run anomaly detection on uploaded data">Detect Anomalies</button>
+                        <button id="clearBtn" class="btn clear-btn" title="Remove highlighted anomalies">Clear Anomalies</button>
+                    </div>
+                </div>
+            </div>
+            <div class="main">
+                <div class="chart-container">
+                    <canvas id="chart"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="bottom-panel" id="bottomPanel" style="display: none;">
+            <div class="stats" id="stats">
+                <h2>Statistics</h2>
+                <div class="stat">
+                    <h3>Total Points</h3>
+                    <p id="totalPoints">0</p>
+                </div>
+                <div class="stat">
+                    <h3>Anomalies</h3>
+                    <p id="anomalyCount">0</p>
+                </div>
+                <div class="stat">
+                    <h3>Time Range</h3>
+                    <p id="timeRange">N/A</p>
+                </div>
+            </div>
+            <div class="anomaly-list" id="anomalyList">
+                <h2>Detected Anomalies</h2>
+                <div id="anomalyItems"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+<!-- SCRIPTS -->
+    </script>
+</html>
+"""
+    with open('index.html', 'w') as f:
+        f.write(html)

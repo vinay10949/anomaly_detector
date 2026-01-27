@@ -3,7 +3,9 @@ import time
 
 # Example usage
 if __name__ == "__main__":
-    dg = DataGenerator()
+    # Choose output format: 'jsonl' or 'csv'
+    output_format = 'jsonl'  # Change to 'csv' for CSV output
+    dg = DataGenerator(output_format=output_format)
     start_time = int(time.time())
     end_time = start_time + 3600 * 24  # 1 day for better patterns
     entities = [

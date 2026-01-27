@@ -21,10 +21,10 @@ The DataGenerator package is structured as follows:
   - CorrelationEngine: Manages cross-metric dependencies.
 
 - **AnomalyInjector**: Injects various types of anomalies.
-  - PointAnomalies: Single spikes or drops.
-  - ContextualAnomalies: Anomalies unexpected in context.
-  - CollectiveAnomalies: Unusual patterns across data.
-  - TimingAnomalies: Issues like race conditions or delays.
+  - PointAnomalies: Single data point anomalies (spikes or drops).
+  - ContextualAnomalies: Anomalies that are abnormal given the local context.
+  - CollectiveAnomalies: Anomalies affecting a group of points (clusters, variance changes, trend reversals, distortions).
+  - TimingAnomalies: Anomalies related to timing (delays, lags, missed beats).
 
 - **RealismEngine**: Adds realism to the data.
   - NoiseGenerator: Adds Gaussian or Poisson noise.
@@ -36,6 +36,37 @@ The DataGenerator package is structured as follows:
   - JSONLWriter: Writes data in JSON Lines format.
   - MetadataGenerator: Generates ground truth labels.
   - StatisticsReporter: Reports statistics on the generated data.
+
+## Anomaly Types and Generation
+
+The DataGenerator automatically injects various types of anomalies into the synthetic data to create comprehensive test datasets for anomaly detection systems. Anomalies are injected randomly based on configurable probabilities.
+
+### Point Anomalies
+- **Spike**: Sudden increase in value (multiplied by a factor, default 3x).
+- **Drop**: Sudden decrease in value (reduced by a percentage, 20-50%).
+
+### Contextual Anomalies
+- **Contextual Anomaly**: A point that deviates significantly from its local moving average but remains within global bounds.
+
+### Collective Anomalies
+- **Spike Cluster**: A cluster of spikes across consecutive points.
+- **Variance Explosion**: Drastic increase in data variance/noise.
+- **Trend Reversal**: Reversal of an existing trend (e.g., increasing becomes decreasing).
+- **Square Wave Distortion**: Replacement of smooth curves with square-wave patterns.
+
+### Timing Anomalies
+- **Timestamp Shift**: Random delay added to a timestamp.
+- **Lag**: Shifting of values forward by several steps.
+- **Missed Beat**: Setting a value to zero or holding the previous value, simulating missed periodic events.
+
+### Configuration
+Anomalies are injected with the following default probabilities:
+- Point: 50%
+- Collective: 20%
+- Contextual: 15%
+- Timing: 15%
+
+Each data segment receives approximately 5% anomalous points on average. The specific anomaly subtype is chosen randomly within each type.
 
 ## Anomaly Detection Algorithm
 
@@ -70,7 +101,7 @@ Output Layer (Anomaly flag, score, explanation)
 - **Fusion Layer**: Combines scores from both pathways
 - **Output Layer**: Provides final anomaly decision with explanation
 
-The algorithm is implemented in `anomaly_detector.py` with simplified versions of HTM and LSM due to dependency constraints. A client-side version is integrated into the web UI that implements actual HTM-inspired training (learning patterns, transitions, and sequence predictions) for interactive anomaly detection.
+A client-side HTM-inspired anomaly detection is integrated into the web UI for interactive anomaly detection.
 
 ## Setup
 
@@ -82,17 +113,17 @@ The algorithm is implemented in `anomaly_detector.py` with simplified versions o
 - Run `python3 main.py` to generate a sample dataset with anomalies.
 - Run `python3 ui.py` to view the anomalous data points in text format.
 - Run `python3 generate_html.py` to generate the beautiful HTML frontend with upload functionality.
-- Run `python3 api_server.py` to start the anomaly detection API server on port 8001.
+- Run `python3 api_server.py` to start the anomaly detection API server on port 8001 (provides stub endpoints).
 - Run `python3 -m http.server 8000` and open `http://localhost:8000/index.html` in a web browser to:
   - Upload your own `.jsonl` dataset file.
   - Upload the corresponding `metadata.json` file for anomalies (optional).
   - View the interactive time series chart with anomalies highlighted in red.
   - See statistics and a list of detected anomalies.
   - Use granularity controls (Minute/Hour wise) and time range slider.
-  - Click "Train Model" to train HTM/LSM models via API.
-  - Click "Detect Anomalies" to run anomaly detection on the uploaded data.
+  - Click "Train Model" to simulate training via API.
+  - Click "Detect Anomalies" to simulate anomaly detection on the uploaded data.
   - Clear metadata with the clear button.
-- Run `python3 anomaly_detector.py` to test the HTM-LSM based anomaly detection algorithm.
+
 
 ## Dependencies
 
@@ -100,12 +131,7 @@ The algorithm is implemented in `anomaly_detector.py` with simplified versions o
 - pandas
 - scipy
 
-Note: For full HTM implementation, install NuPIC:
-```
-pip install nupic
-```
-
-For LSM, ReservoirPy:
+Note: For LSM, ReservoirPy:
 ```
 pip install reservoirpy
 ```
