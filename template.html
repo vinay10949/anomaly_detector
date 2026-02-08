@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anomaly Time Series Viewer</title>
+    <title>HTM Anomaly Monitor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/nouislider/dist/nouislider.min.css">
@@ -20,7 +20,7 @@
     <div class="app">
         <div class="top-row">
             <div class="sidebar">
-                <h1>Anomaly Time Series Viewer</h1>
+                <h1>HTM Anomaly Monitor</h1>
                 <div class="upload-section">
                     <div class="drop-zone" id="datasetDropZone">
                         <input type="file" id="datasetFile" accept=".jsonl,.csv" style="display: none;">
@@ -34,21 +34,32 @@
                         <input type="file" id="metadataFile" accept=".json" style="display: none;">
                         <div class="drop-zone-content">
                             <div class="drop-icon">🏷️</div>
-                            <strong>Drop Anomaly Labels (.json)</strong><br>
-                            or click to select your ground truth anomaly file
+                            <strong>Drop Reference Metadata (.json)</strong><br>
+                            or click to select reference anomaly metadata
                         </div>
                     </div>
                 </div>
                 <div class="controls">
-                    <div class="control-group">
-                        <label><strong>Data Aggregation:</strong></label>
-                        <button id="minuteBtn" class="btn active" title="Show data points per minute">Per Minute</button>
-                        <button id="hourBtn" class="btn" title="Aggregate data to hourly averages">Hourly</button>
+                    <div class="control-group" style="margin-top: 20px; border-top: 1px solid var(--panel-border); padding-top: 15px;">
+                        <label><strong>Model:</strong></label>
+                        <button id="saveModelBtn" class="btn" style="margin-top: 8px;">Save Model</button>
+                        <button id="loadModelBtn" class="btn" style="margin-top: 8px;">Load Model</button>
+                        <div id="trainingProgress" class="training-progress">Training status: idle</div>
                     </div>
                     <div class="control-group">
-                        <label><strong>Time Range Filter:</strong></label>
-                        <div id="timeRangeSlider"></div>
-                        <div id="timeRangeValue" style="font-family: 'JetBrains Mono', monospace; margin-top: 5px;">0% - 100%</div>
+                        <label><strong>Layers:</strong></label>
+                        <label class="layer-toggle">
+                            <input id="toggleDetected" type="checkbox" checked>
+                            <span>Detected</span>
+                        </label>
+                        <label class="layer-toggle">
+                            <input id="toggleReference" type="checkbox" checked>
+                            <span>Reference</span>
+                        </label>
+                        <label class="layer-toggle">
+                            <input id="toggleOverlap" type="checkbox" checked>
+                            <span>Overlap</span>
+                        </label>
                     </div>
                     <div class="control-group">
                         <button id="trainBtn" class="btn train-btn" title="Simulate training an anomaly detection model">Train Model</button>
@@ -58,30 +69,117 @@
                 </div>
             </div>
             <div class="main">
-                <div class="chart-container">
-                    <canvas id="chart"></canvas>
+                <div>
+                    <div class="chart-toolbar">
+                        <div class="control-group">
+                            <label><strong>Aggregation:</strong></label>
+                            <button id="aggregateBtn" class="btn active" title="Show raw points (no time bucketing)">Aggregate</button>
+                            <button id="minuteBtn" class="btn" title="Aggregate to per-minute averages">Minute</button>
+                            <button id="hourBtn" class="btn" title="Aggregate to hourly averages">Hourwise</button>
+                        </div>
+                        <div class="control-group">
+                            <label><strong>Time Range:</strong></label>
+                            <div class="range-stack">
+                                <div id="timeRangeSlider"></div>
+                                <div id="timeRangeValue" style="font-family: 'JetBrains Mono', monospace;">0% - 100%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart"></canvas>
+                    </div>
+                </div>
+                <!-- Simulation Panel -->
+                <div class="simulation-panel" style="margin-top: 20px; background: var(--bg-card); border: 1px solid var(--panel-border); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <h2 style="margin: 0; font-size: 1.25rem; font-weight: 600; color: var(--text-color);">Live Simulation</h2>
+                            <span id="simStatus" style="font-size: 0.85rem; padding: 4px 10px; border-radius: 999px; background: var(--bg-dark); color: var(--muted); border: 1px solid var(--panel-border);">Inactive</span>
+                        </div>
+                        <div class="control-group" style="display: flex; align-items: center; gap: 15px;">
+                            <label style="display: flex; align-items: center; font-size: 0.9rem; color: var(--text-color); cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="learningToggle" style="margin-right: 8px; accent-color: #2dd4bf;">
+                                <span>Online Learning</span>
+                            </label>
+                            <div style="height: 24px; width: 1px; background: var(--panel-border);"></div>
+                            <button id="startSimBtn" class="btn" style="background: rgba(45, 212, 191, 0.15); border-color: rgba(45, 212, 191, 0.4); color: #2dd4bf; padding: 6px 16px; font-weight: 500;">
+                                <span style="margin-right: 6px;">▶</span>Start Simulation
+                            </button>
+                            <button id="stopSimBtn" class="btn" style="background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.4); color: #f43f5e; padding: 6px 16px; font-weight: 500; display: none;">
+                                <span style="margin-right: 6px;">⏹</span>Stop Simulation
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="position: relative; height: 300px; width: 100%; background: var(--bg-dark); border-radius: 8px; border: 1px solid var(--panel-border); overflow: hidden;">
+                        <canvas id="simulationChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
         <div class="bottom-panel" id="bottomPanel" style="display: none;">
             <div class="stats" id="stats">
-                <h2>Statistics</h2>
+                <h2>Detection Metrics</h2>
                 <div class="stat">
                     <h3>Total Points</h3>
                     <p id="totalPoints">0</p>
                 </div>
                 <div class="stat">
-                    <h3>Anomalies</h3>
+                    <h3>Detected Total</h3>
                     <p id="anomalyCount">0</p>
                 </div>
                 <div class="stat">
                     <h3>Time Range</h3>
                     <p id="timeRange">N/A</p>
                 </div>
+                <div class="stat">
+                    <h3>Detected</h3>
+                    <p id="detectedCount">0</p>
+                </div>
+                <div class="stat">
+                    <h3>Reference</h3>
+                    <p id="referenceCount">0</p>
+                </div>
+                <div class="stat">
+                    <h3>TP</h3>
+                    <p id="tpCount">0</p>
+                </div>
+                <div class="stat">
+                    <h3>FP</h3>
+                    <p id="fpCount">0</p>
+                </div>
+                <div class="stat">
+                    <h3>FN</h3>
+                    <p id="fnCount">0</p>
+                </div>
+                <div class="stat">
+                    <h3>Precision</h3>
+                    <p id="precision">0.00%</p>
+                </div>
+                <div class="stat">
+                    <h3>Recall</h3>
+                    <p id="recall">0.00%</p>
+                </div>
+                <div class="stat">
+                    <h3>F1</h3>
+                    <p id="f1">0.00%</p>
+                </div>
             </div>
             <div class="anomaly-list" id="anomalyList">
-                <h2>Detected Anomalies</h2>
-                <div id="anomalyItems"></div>
+                <h2>Anomaly Details</h2>
+                <div class="anomaly-sections">
+                    <div class="anomaly-section">
+                        <h3>Detected Anomalies</h3>
+                        <div id="detectedAnomalyItems"></div>
+                    </div>
+                    <div class="anomaly-section">
+                        <h3>Reference Anomalies</h3>
+                        <div id="referenceAnomalyItems"></div>
+                    </div>
+                    <div class="anomaly-section">
+                        <h3>Mismatches (FP/FN)</h3>
+                        <div id="mismatchAnomalyItems"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -89,6 +187,3 @@
 <!-- SCRIPTS -->
     </script>
 </html>
-"""
-    with open('index.html', 'w') as f:
-        f.write(html)

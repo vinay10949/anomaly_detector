@@ -68,72 +68,94 @@ Anomalies are injected with the following default probabilities:
 
 Each data segment receives approximately 5% anomalous points on average. The specific anomaly subtype is chosen randomly within each type.
 
-## Anomaly Detection Algorithm
+## Anomaly Detection (Current Implementation)
 
-The system includes a core anomaly detection algorithm based on Hierarchical Temporal Memory (HTM) and Liquid State Machines (LSM):
+The current detector is an in-memory, per-stream anomaly service:
+- One model per `(entity_id, signal_type, metric)` stream.
+- Input normalization and deduplication by `(timestamp, entity_id, signal_type, metric)`.
+- API-first detection flow (`/train`, `/detect`, `/detect_batch`, `/status`).
+- Metadata is treated as **reference/weak labels** for UI comparison (not strict ground truth).
 
-### Architecture
-
-```
-Input Event
-    ↓
-Feature Extraction Layer
-    ↓
-Preprocessing (Normalization/Scaling)
-    ↓
-    ├─ LSM Pathway (Reservoir: 500 neurons)
-    │   - Liquid State computation
-    │   - Readout for temporal anomalies
-    └─ HTM Pathway (SDR Encoding + Spatial Pooler + Temporal Memory)
-        - RandomDistributedScalarEncoder for SDR creation
-        - Sequence anomaly detection
-    ↓
-Fusion Layer (Weighted average, confidence, voting)
-    ↓
-Output Layer (Anomaly flag, score, explanation)
-```
-
-### Components
-
-- **Feature Extraction**: Value encoding, temporal features, entity context
-- **LSM Pathway**: Reservoir computing for timing-based anomalies
-- **HTM Pathway**: Uses NuPIC library with SDR (Sparse Distributed Representations) encoding via RandomDistributedScalarEncoder, Spatial Pooler, Temporal Memory, and Anomaly detector for pattern-based anomalies
-- **Fusion Layer**: Combines scores from both pathways
-- **Output Layer**: Provides final anomaly decision with explanation
-
-A client-side HTM-inspired anomaly detection is integrated into the web UI for interactive anomaly detection.
+`htm.core` is used when available; the runtime falls back to deterministic statistical scoring if HTM initialization/import is unavailable.
 
 ## Setup
 
-1. Install dependencies: `pip install -r requirements.txt` (Note: Dependencies may need to be installed in a proper environment with internet access.)
-2. The package is written in Python.
+### 1) Use Python 3.11 (recommended)
 
-## Usage
+`htm.core` is most reliable with Python 3.11.
 
-- Run `python3 main.py` to generate a sample dataset with anomalies.
-- Run `python3 ui.py` to view the anomalous data points in text format.
-- Run `python3 generate_html.py` to generate the beautiful HTML frontend with upload functionality.
-- Run `python3 api_server.py` to start the anomaly detection API server on port 8001 (provides stub endpoints).
-- Run `python3 -m http.server 8000` and open `http://localhost:8000/index.html` in a web browser to:
-  - Upload your own `.jsonl` dataset file.
-  - Upload the corresponding `metadata.json` file for anomalies (optional).
-  - View the interactive time series chart with anomalies highlighted in red.
-  - See statistics and a list of detected anomalies.
-  - Use granularity controls (Minute/Hour wise) and time range slider.
-  - Click "Train Model" to simulate training via API.
-  - Click "Detect Anomalies" to simulate anomaly detection on the uploaded data.
-  - Clear metadata with the clear button.
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
+### 2) (Optional) Generate sample dataset
+
+```bash
+python main.py --points 90000 --anomaly-percent 10
+```
+
+For a taxi-demand-like long-horizon shape (rise then decline):
+
+```bash
+python main.py --points 90000 --anomaly-percent 5 --series-style taxi_like --smoothness 0.75
+```
+
+Arguments:
+- `--points`: exact number of points to generate across all streams.
+- `--anomaly-percent`: anomaly injection rate, must be between `5` and `15`.
+- `--smoothness`: continuity factor for smoother time series (`0.0` to `<1.0`, default `0.9`).
+- `--series-style`: baseline style (`default` or `taxi_like`).
+- `--output-format`: `jsonl` (default) or `csv`.
+- `--duration-hours`: used only when `--points` is not provided.
+
+This creates/updates `dataset.jsonl` and `metadata.json`.
+
+## How To Run
+
+### Terminal 1: Start API server
+
+```bash
+python api_server.py
+```
+
+Server runs on `http://localhost:8001`.
+
+Available endpoints:
+- `POST /train` with `{ "data": [...] }`
+- `POST /detect` with `{ "point": {...} }`
+- `POST /detect_batch` with `{ "points": [...], "return_scores": true }`
+- `GET /status`
+
+### Terminal 2: Start frontend static server
+
+```bash
+python generate_html.py
+python -m http.server 8000
+```
+
+Open `http://localhost:8000/index.html`.
+
+### UI workflow
+
+1. Upload `dataset.jsonl` (or `.csv`).
+2. Optionally upload `metadata.json` as **reference anomalies**.
+3. Click **Train Model**.
+4. Click **Detect Anomalies** (batch detection via `/detect_batch`).
+5. Use chart layer toggles (Detected / Reference / Overlap).
+6. Review TP/FP/FN, precision/recall/F1, and split anomaly lists.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -q
+```
 
 ## Dependencies
 
 - numpy
 - pandas
 - scipy
-
-Note: For LSM, ReservoirPy:
-```
-pip install reservoirpy
-```
-
-The code is designed to use these libraries when available, falling back to simplified implementations otherwise.
+- htm.core
