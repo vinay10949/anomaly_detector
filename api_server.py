@@ -95,6 +95,15 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
+            def resolve_mode(payload: dict, *, default: str = "predict_only") -> str:
+                """Prefer explicit mode; fall back to legacy learn bool for compatibility."""
+                mode_val = payload.get("mode")
+                if mode_val is not None:
+                    return str(mode_val)
+                if "learn" in payload:
+                    return "online" if bool(payload.get("learn")) else "predict_only"
+                return default
+
             if self.path == '/configure':
                 # Configure detector parameters
                 htm_params = data.get("htm_params")
@@ -137,7 +146,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 reference_metadata = data.get('reference_metadata')
-                log_progress = bool(data.get("log_progress", True))
+                log_progress = bool(data.get("log_progress", False))
                 log_every = int(data.get("log_every", 1000))
                 log_fn = (lambda msg: print(msg, flush=True)) if log_progress else None
                 checkpoint = data.get("checkpoint") or {}
@@ -173,8 +182,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     self._text_response(400, "No data point provided")
                     return
                 
-                learn_requested = bool(data.get('learn', False))
-                result = detector.detect(data_point, learn=learn_requested)
+                mode = resolve_mode(data, default='predict_only')
+                result = detector.detect(data_point, mode=mode)
                 print("Result ", result)
                 response = {
                     'timestamp': result['timestamp'],
@@ -209,7 +218,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 return_scores = bool(data.get('return_scores', True))
-                learn = bool(data.get('learn', False))
+                mode = resolve_mode(data, default='predict_only')
                 reset_sequence = bool(data.get('reset_sequence', True))
                 finalize_episodes = bool(data.get("finalize_episodes", True))
                 batch_warmup_points = data.get('batch_warmup_points')
@@ -222,7 +231,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 response = detector.detect_batch(
                     points,
                     return_scores=return_scores,
-                    learn=learn,
+                    mode=mode,
                     reset_sequence=reset_sequence,
                     batch_warmup_points=batch_warmup_points,
                     finalize_episodes=finalize_episodes,

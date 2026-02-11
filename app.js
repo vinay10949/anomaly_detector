@@ -489,6 +489,7 @@ async function trainModel() {
             body: JSON.stringify({
                 data: dataset,
                 reference_metadata: referenceAnomalies.length > 0 ? referenceAnomalies : undefined,
+                log_progress: false,
             }),
         });
 
@@ -560,7 +561,7 @@ async function detectAnomaliesBatch() {
             body: JSON.stringify({
                 points: dataset,
                 return_scores: true,
-                learn: false,
+                mode: 'predict_only',
                 reset_sequence: true,
                 batch_warmup_points: 8,
             }),
@@ -814,6 +815,7 @@ function drawChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            events: ['mousemove', 'mouseout', 'click', 'touchstart', 'touchend'],
             interaction: {
                 mode: 'nearest',
                 intersect: false,
@@ -1165,6 +1167,7 @@ document.getElementById('loadModelBtn').addEventListener('click', async () => {
 let simulationChart = null;
 let simulationInterval = null;
 const SIM_WINDOW_SIZE = 100;
+let simulationDetectErrorShown = false;
 
 document.getElementById('startSimBtn').addEventListener('click', startSimulation);
 document.getElementById('stopSimBtn').addEventListener('click', stopSimulation);
@@ -1212,6 +1215,7 @@ function initSimulationChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            events: ['mousemove', 'mouseout', 'click', 'touchstart', 'touchend'],
             plugins: {
                 legend: { display: true, labels: { color: '#e9efff' } }
             },
@@ -1268,6 +1272,17 @@ async function startSimulation() {
     btn.classList.add('loading');
     
     try {
+        // Simulation detection requires a trained model.
+        const statusResponse = await fetch('http://localhost:8001/status');
+        if (!statusResponse.ok) {
+            throw new Error('Cannot reach API server');
+        }
+        const statusData = await statusResponse.json();
+        if (statusData.status !== 'trained') {
+            toast('Train the model first, then start simulation.', 'linear-gradient(to right, #FF9800, #F57C00)', 4500);
+            return;
+        }
+
         // Start backend simulation
         const response = await fetch('http://localhost:8001/simulation/start', {
             method: 'POST',
@@ -1285,6 +1300,7 @@ async function startSimulation() {
         document.getElementById('stopSimBtn').style.display = 'inline-block';
         document.getElementById('simStatus').textContent = 'Running (Network Event / sendmsg)';
         document.getElementById('simStatus').style.color = '#2dd4bf';
+        simulationDetectErrorShown = false;
         
         initSimulationChart();
         
@@ -1327,13 +1343,13 @@ async function fetchNextSimulationPoint() {
         const point = genData.point;
         
         // 2. Detect Anomaly (Standard API call)
-        const learningEnabled = document.getElementById('learningToggle').checked;
+        const learningEnabled = document.getElementById('learningToggle')?.checked ?? true;
         const detectResponse = await fetch('http://localhost:8001/detect', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 point: point,
-                learn: learningEnabled
+                mode: learningEnabled ? 'online' : 'predict_only'
             })
         });
         
@@ -1342,7 +1358,12 @@ async function fetchNextSimulationPoint() {
             // Note: /detect response structure is flat, not nested in 'result'
             result = await detectResponse.json(); 
         } else {
-            console.error("Detection failed");
+            const errorText = await detectResponse.text();
+            console.error("Detection failed:", errorText);
+            if (!simulationDetectErrorShown) {
+                toast(`Simulation detect failed: ${errorText}`, 'linear-gradient(to right, #E91E63, #C2185B)', 5000);
+                simulationDetectErrorShown = true;
+            }
         }
         
         // 3. Update Chart

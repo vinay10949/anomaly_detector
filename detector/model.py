@@ -46,6 +46,7 @@ class StreamModel:
     }
     _DEFAULT_CONTEXTUAL_MIN_RECORDS = 50
     _DEFAULT_LEARN_POLICY = "gated"
+    _DEFAULT_LEARN_MAX_TM_SCORE = 0.80
     _DEFAULT_LEARN_MAX_POINT_Z = 3.5
     _DEFAULT_LEARN_MAX_CONTEXTUAL_SCORE = 0.70
     _DEFAULT_EPISODE_CONTINUE_SCORE = 0.30
@@ -165,6 +166,9 @@ class StreamModel:
             self._scoring.get("contextual_min_records") or self._DEFAULT_CONTEXTUAL_MIN_RECORDS
         )
         self._learn_policy = str(self._learning.get("policy") or self._DEFAULT_LEARN_POLICY)
+        self._learn_max_tm_score = float(
+            self._learning.get("max_tm_score") or self._DEFAULT_LEARN_MAX_TM_SCORE
+        )
         self._learn_max_point_z = float(self._learning.get("max_point_z") or self._DEFAULT_LEARN_MAX_POINT_Z)
         self._learn_max_contextual_score = float(
             self._learning.get("max_contextual_score") or self._DEFAULT_LEARN_MAX_CONTEXTUAL_SCORE
@@ -441,26 +445,47 @@ class StreamModel:
     def _should_learn(
         self,
         *,
-        requested: bool,
-        label: int | None,
+        mode: str,
+        tm_score: float,
         point_z: float,
         contextual_score: float,
+        episode_active: bool,
+        label: int | None,
     ) -> bool:
-        if not requested:
-            return False
+        """
+        Smart online learning gate for production-style HTM operation.
+
+        Modes:
+        - 'offline': force learning (training / warm-up)
+        - 'predict_only': disable learning
+        - 'online': apply policy-driven anomaly gating
+        """
+        # Never learn on labeled anomalies
         if label is not None and int(label) != 0:
             return False
-        policy = (self._learn_policy or "").strip().lower()
-        if policy == "never":
-            return False
-        if policy == "always":
+
+        mode_key = str(mode).strip().lower()
+        if mode_key == "offline":
             return True
-        # Default: gated learning.
-        if self._episode_active is not None:
+        if mode_key == "predict_only":
             return False
-        if float(point_z) >= float(self._learn_max_point_z):
+        if mode_key != "online":
             return False
-        if float(contextual_score) >= float(self._learn_max_contextual_score):
+
+        policy = str(self._learn_policy).strip().lower()
+        if policy in {"never", "off", "disabled"}:
+            return False
+        if policy in {"always", "on"}:
+            return True
+
+        # Default policy: gated learning
+        if episode_active:
+            return False
+        if float(tm_score) > float(self._learn_max_tm_score):
+            return False
+        if not math.isfinite(float(point_z)) or abs(float(point_z)) > float(self._learn_max_point_z):
+            return False
+        if float(contextual_score) > float(self._learn_max_contextual_score):
             return False
         return True
 
@@ -484,20 +509,43 @@ class StreamModel:
         self.stats.update(float(value))
         self._update_short_term(float(value))
 
-    def detect(self, value: float, timestamp: int, *, learn_requested: bool = False, label: int | None = None) -> dict:
+    def detect(self, value: float, timestamp: int, *, mode: str = 'online', label: int | None = None) -> dict:
+        """
+        Detect anomalies in a data point.
+        
+        Args:
+            value: The value to analyze
+            timestamp: Unix timestamp
+            mode: Learning mode - 'offline' (always learn), 'online' (smart learning), 'predict_only' (never learn)
+            label: Optional ground truth label (1 = anomaly, 0 = normal)
+        
+        Returns:
+            Dictionary with anomaly_flag, scores, and metadata
+        """
         point_score, point_z = self._point_deviation_score(float(value))
         contextual_score, expected_value, residual = self._contextual_score(float(value))
-        learn_applied = self._should_learn(
-            requested=bool(learn_requested),
-            label=label,
-            point_z=float(point_z),
-            contextual_score=float(contextual_score),
-        )
-
-        tm_raw = self._step_htm(value, learn=learn_applied, timestamp=timestamp)
+        
+        # First, get TM prediction (before learning)
+        tm_raw = self._step_htm(value, learn=False, timestamp=timestamp)
         if tm_raw is None:
             raise RuntimeError(f"HTM step failed: {self._htm_error or 'unknown error'}")
         tm_score = float(tm_raw)
+        
+        # Decide whether to learn based on mode and prediction quality
+        learn_applied = self._should_learn(
+            mode=str(mode),
+            tm_score=float(tm_score),
+            point_z=float(point_z),
+            contextual_score=float(contextual_score),
+            episode_active=bool(self._episode_active),
+            label=label,
+        )
+        
+        # If learning, step HTM again with learn=True
+        if learn_applied:
+            tm_raw_learn = self._step_htm(value, learn=True, timestamp=timestamp)
+            if tm_raw_learn is None:
+                raise RuntimeError(f"HTM step failed: {self._htm_error or 'unknown error'}")
 
         collective_score = self._collective_shift_score(float(value))
         episode_event, episode_flag = self._update_episode_state(
@@ -540,9 +588,10 @@ class StreamModel:
         # Episodes are tracked and emitted separately (start/end). Point-level anomaly_flag
         # is driven by likelihood/spike to avoid turning an entire sustained episode into
         # thousands of "anomalous points" in batch UX.
-        is_anomaly = is_warm and (
-            float(likelihood) >= float(self.likelihood_threshold)
-            or strong_spike
+        # Allow clear point spikes to surface even during warmup; keep likelihood-gated
+        # anomalies behind warmup to avoid noisy cold-start alerts.
+        is_anomaly = bool(strong_spike) or (
+            is_warm and float(likelihood) >= float(self.likelihood_threshold)
         )
 
         scores = {

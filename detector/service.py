@@ -29,16 +29,29 @@ class AnomalyDetectorService:
 
     def __init__(self, config: DetectorConfig | None = None) -> None:
         self.config = config or DetectorConfig()
-        if self.config.require_htm:
-            try:
-                import htm  # noqa: F401
-            except Exception as exc:  # pragma: no cover
-                raise RuntimeError(
-                    f"HTM is required but not available in this Python ({exc}). "
-                    "Start the server with: .venv/bin/python api_server.py"
-                ) from exc
+        self._refresh_runtime_flags()
+        if self.config.require_htm and not self._htm_core_available:
+            raise RuntimeError(
+                f"HTM is required but not available in this Python ({self._htm_core_error or 'unknown error'}). "
+                "Start the server with: .venv/bin/python api_server.py"
+            )
         self.config.htm_params = StreamModel.normalize_htm_params(self.config.htm_params)
         self.reset()
+
+    def _refresh_runtime_flags(self) -> None:
+        try:
+            import htm  # noqa: F401
+            self._htm_core_available = True
+            self._htm_core_error = None
+        except Exception as exc:  # pragma: no cover
+            self._htm_core_available = False
+            self._htm_core_error = str(exc)
+
+    def _ensure_runtime_flags(self) -> None:
+        if not hasattr(self, "_htm_core_available"):
+            self._refresh_runtime_flags()
+        if not hasattr(self, "_htm_core_error"):
+            self._htm_core_error = None
 
     def reset(self) -> None:
         self._models: dict[tuple[str, str, str], StreamModel] = {}
@@ -195,29 +208,35 @@ class AnomalyDetectorService:
             "checkpoints_saved": len(checkpoint_paths),
         }
 
-    def detect(self, raw_point: dict, learn: bool = False) -> DetectionResult:
-        if not self._trained and not learn:
-            raise RuntimeError("Model not trained")
+    def detect(self, raw_point: dict, mode: str = 'online') -> DetectionResult:
+        # Backward compatibility: full pickles from older versions may not have
+        # runtime flag attributes. Rebuild them lazily on first detect call.
+        self._ensure_runtime_flags()
+        if self.config.require_htm and not self._htm_core_available:
+            raise RuntimeError(
+                f"HTM runtime unavailable ({self._htm_core_error or 'unknown error'}). "
+                "Start the server with: .venv/bin/python api_server.py"
+            )
 
         points = normalize_points([raw_point])
         if not points:
             raise ValueError("No valid point supplied")
 
         if not self._trained:
-            # Online initialization path (used for streaming simulation when learn=True).
+            # Online initialization path (used for streaming simulation).
             self._points_seen += 1
             self._points_used += 1
-            result = self._detect_point(points[0], learn_requested=True)
+            result = self._detect_point(points[0], mode='online')
             self._trained = True
             self._htm_core_streams = sum(1 for model in self._models.values() if model.uses_htm_core)
             return result
 
-        return self._detect_point(points[0], learn_requested=learn)
+        return self._detect_point(points[0], mode=mode)
 
     def _detect_point(
         self,
         point: DataPoint,
-        learn_requested: bool = False,
+        mode: str = 'online',
         *,
         model: StreamModel | None = None,
     ) -> DetectionResult:
@@ -225,7 +244,7 @@ class AnomalyDetectorService:
         details = model.detect(
             point["value"],
             point["timestamp"],
-            learn_requested=bool(learn_requested),
+            mode=str(mode),
             label=point.get("label"),
         )
         result: DetectionResult = {
@@ -253,7 +272,7 @@ class AnomalyDetectorService:
         raw_points: list[dict],
         *,
         return_scores: bool = True,
-        learn: bool = False,
+        mode: str = 'predict_only',
         reset_sequence: bool = True,
         batch_warmup_points: int | None = None,
         finalize_episodes: bool = True,
@@ -262,6 +281,8 @@ class AnomalyDetectorService:
             raise RuntimeError("Model not trained")
 
         points = normalize_points(raw_points)
+        mode_str = str(mode)
+        learn_enabled = mode_str != "predict_only"
         results: list[dict] = []
         detected_count = 0
         learned_count = 0
@@ -283,7 +304,7 @@ class AnomalyDetectorService:
                 model.reset_sequence_state()
                 seen_since_reset[key] = 0
 
-            result = self._detect_point(point, learn_requested=learn, model=model)
+            result = self._detect_point(point, mode=mode, model=model)
             if reset_sequence:
                 seen_since_reset[key] = seen_since_reset.get(key, 0) + 1
                 if reset_warmup > 0 and seen_since_reset[key] <= reset_warmup:
@@ -331,7 +352,8 @@ class AnomalyDetectorService:
             "summary": {
                 "detected_count": detected_count,
                 "total": len(points),
-                "learn": bool(learn),
+                "learn": bool(learn_enabled),
+                "mode": mode_str,
                 "learned_points": int(learned_count),
                 "reset_sequence": bool(reset_sequence),
                 "batch_warmup_points": int(reset_warmup),

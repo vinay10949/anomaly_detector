@@ -173,7 +173,7 @@ class TestDetectorService(unittest.TestCase):
         out = svc.detect_batch(
             shifted,
             return_scores=True,
-            learn=False,
+            mode='predict_only',
             reset_sequence=True,
             batch_warmup_points=0,
             finalize_episodes=True,
@@ -227,7 +227,7 @@ class TestDetectorService(unittest.TestCase):
             "metric": "cpu",
             "value": 110.0,
         }
-        res = svc.detect(point, learn=False)
+        res = svc.detect(point, mode='predict_only')
         self.assertTrue(res["anomaly_flag"])
         scores = res.get("scores") or {}
         self.assertGreater(float(scores.get("contextual") or 0.0), 0.5)

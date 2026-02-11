@@ -17,7 +17,6 @@ def normalize_point(raw: dict) -> DataPoint:
         "metric": str(raw["metric"]),
         "value": float(raw["value"]),
     }
-    print("Raw ",raw)
     if "label" in raw:
         try:
             point["label"] = int(raw["label"])
